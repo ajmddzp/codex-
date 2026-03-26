@@ -46,12 +46,11 @@ def load_model_config(config_path: Path | str = DEFAULT_CONFIG_PATH) -> ModelCli
     base_url = str(llm.get("base_url", "")).strip()
     api_key = str(llm.get("api_key", "")).strip()
     default_model = str(llm.get("model", "")).strip()
-
     candidates_raw = llm.get("candidate_models", [])
     candidate_models = [str(item).strip() for item in candidates_raw if str(item).strip()]
 
     if not default_model:
-        default_model = candidate_models[0] if candidate_models else "gpt-4o-mini"
+        default_model = candidate_models[0] if candidate_models else "gpt-5"
     if default_model and default_model not in candidate_models:
         candidate_models.insert(0, default_model)
 
@@ -81,6 +80,50 @@ def list_candidate_models(config_path: Path | str = DEFAULT_CONFIG_PATH) -> list
     """
     cfg = load_model_config(config_path)
     return cfg.candidate_models[:] if cfg.candidate_models else [cfg.default_model]
+
+
+def merge_user_message_with_attachments(
+    user_message: str,
+    attachments: Sequence[dict[str, object]] | None,
+    *,
+    max_chars_total: int = 12000,
+) -> str:
+    """
+    Merge uploaded file text blocks into the current user message.
+    """
+    text = user_message.strip()
+    blocks = attachments or []
+    if not blocks:
+        return text
+
+    out: list[str] = [text] if text else []
+    out.append("以下是用户本次附带的文件内容：")
+
+    used = 0
+    for idx, block in enumerate(blocks, 1):
+        name = str(block.get("name", f"file_{idx}"))
+        content = str(block.get("content", ""))
+        if not content:
+            continue
+
+        remain = max_chars_total - used
+        if remain <= 0:
+            break
+
+        snippet = content[:remain]
+        used += len(snippet)
+
+        out.append(f"[文件 {idx}] {name}")
+        out.append("```text")
+        out.append(snippet)
+        out.append("```")
+        if bool(block.get("truncated", False)) or len(snippet) < len(content):
+            out.append("(该文件内容已截断)")
+
+    if used == 0:
+        out.append("(未读取到可用文件文本内容)")
+
+    return "\n".join(part for part in out if part).strip()
 
 
 def chat_completion(
@@ -284,7 +327,6 @@ def _extract_text_from_chat_completion(data: dict) -> str:
         text = content.strip()
         return text if text else "(空回复)"
 
-    # Some providers return list chunks for content.
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:

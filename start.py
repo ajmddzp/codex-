@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from file_store import build_attachment_texts, save_upload_request
 from model_client import (
     ModelClientError,
     chat_completion,
     compose_messages_for_request,
     list_candidate_models as mc_list_candidate_models,
     load_model_config,
+    merge_user_message_with_attachments,
 )
 
 
@@ -40,7 +42,7 @@ def load_candidate_models() -> list[str]:
     try:
         models = mc_list_candidate_models(CONFIG_PATH)
         normalized = [normalize_model_name(model) for model in models]
-        return [m for m in normalized if m] or DEFAULT_MODELS[:]
+        return [model for model in normalized if model] or DEFAULT_MODELS[:]
     except Exception:
         return DEFAULT_MODELS[:]
 
@@ -76,18 +78,6 @@ def parse_json_body(handler: BaseHTTPRequestHandler) -> dict:
         return json.loads(raw.decode("utf-8"))
     except Exception:
         return {}
-
-
-def parse_filename_from_multipart(content_type: str, raw_body: bytes) -> str:
-    if "multipart/form-data" not in content_type:
-        return "unnamed_file"
-
-    text = raw_body.decode("latin1", errors="ignore")
-    match = re.search(r'filename="([^"]*)"', text)
-    if not match:
-        return "unnamed_file"
-    filename = match.group(1).strip()
-    return filename or "unnamed_file"
 
 
 def read_body(handler: BaseHTTPRequestHandler) -> bytes:
@@ -131,7 +121,7 @@ def is_non_retryable_error(error_text: str) -> bool:
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "CloudChatServer/0.4"
+    server_version = "CloudChatServer/0.5"
     protocol_version = "HTTP/1.1"
 
     def do_OPTIONS(self) -> None:
@@ -189,18 +179,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/files":
-            content_type = self.headers.get("Content-Type", "")
-            raw_body = read_body(self)
-            filename = parse_filename_from_multipart(content_type, raw_body)
-            self._send_json(
-                200,
-                {
-                    "id": f"todo_file_{now_ms()}",
-                    "name": filename,
-                    "size": None,
-                    "_todo": "Replace with upload_file_api implementation.",
-                },
-            )
+            self._handle_upload_file()
             return
 
         if path == "/api/model/switch":
@@ -215,6 +194,16 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(404, {"error": "Not Found"})
+
+    def _handle_upload_file(self) -> None:
+        content_type = self.headers.get("Content-Type", "")
+        raw_body = read_body(self)
+        try:
+            uploaded = save_upload_request(content_type=content_type, raw_body=raw_body)
+        except Exception as exc:
+            self._send_json(400, {"error": "upload_failed", "detail": str(exc)})
+            return
+        self._send_json(200, uploaded)
 
     def _handle_send_message(self) -> None:
         payload = parse_json_body(self)
@@ -243,10 +232,21 @@ class AppHandler(BaseHTTPRequestHandler):
                 if role in ("system", "user", "assistant") and content:
                     history_messages.append({"role": role, "content": content})
 
+        file_ids_raw = payload.get("fileIds")
+        file_ids = [str(fid).strip() for fid in file_ids_raw] if isinstance(file_ids_raw, list) else []
+        file_ids = [fid for fid in file_ids if fid]
+
+        attachment_blocks = build_attachment_texts(file_ids) if file_ids else []
+        user_text_for_model = merge_user_message_with_attachments(
+            user_text,
+            attachment_blocks,
+            max_chars_total=12000,
+        )
+
         model_messages = compose_messages_for_request(
             system_prompt=None,
             history_messages=history_messages,
-            user_message=user_text,
+            user_message=user_text_for_model,
         )
 
         try_models = build_model_try_order(
@@ -298,6 +298,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 "model": used_model,
                 "fallback_used": used_model != requested_model,
                 "attempts": attempts,
+                "files_used": len(attachment_blocks),
             },
         )
 
@@ -342,7 +343,7 @@ class AppHandler(BaseHTTPRequestHandler):
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     server = ThreadingHTTPServer((host, port), AppHandler)
     print(f"Server started: http://{host}:{port}")
-    print("Mode: api-ready (messages call cloud model with fallback retry)")
+    print("Mode: api-ready (uploads + messages + cloud model)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

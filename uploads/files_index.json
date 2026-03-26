@@ -1,0 +1,23 @@
+{
+  "file_57fbb2a9eae84886": {
+    "id": "file_57fbb2a9eae84886",
+    "name": "1.png",
+    "size": 1505824,
+    "path": "uploads\\file_57fbb2a9eae84886.png",
+    "created_at": "2026-03-26T00:56:26.771444+00:00"
+  },
+  "file_f28483dc79b04014": {
+    "id": "file_f28483dc79b04014",
+    "name": "CMakeLists.txt",
+    "size": 788,
+    "path": "uploads\\file_f28483dc79b04014.txt",
+    "created_at": "2026-03-26T00:57:24.021528+00:00"
+  },
+  "file_25139ba84a964a5d": {
+    "id": "file_25139ba84a964a5d",
+    "name": "qq.png",
+    "size": 50821,
+    "path": "uploads\\file_25139ba84a964a5d.png",
+    "created_at": "2026-03-26T00:58:31.920129+00:00"
+  }
+}
