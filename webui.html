@@ -368,6 +368,15 @@
     }
     window.CloudChatHooks = { onHistory, onCreate, onInput, onSend, onFile, onModel }
     */
+    window.CLOUD_CHAT_ENDPOINTS = window.CLOUD_CHAT_ENDPOINTS || {
+      listConversations: '/api/history',
+      createConversation: '/api/conversations',
+      listMessages: (id) => `/api/conversations/${id}/messages`,
+      sendMessage: '/api/messages',
+      uploadFile: '/api/files',
+      switchModel: '/api/model/switch',
+      listModels: '/api/models'
+    };
     const bridge = pickBridge();
     const hooks = window.CloudChatHooks || {};
     const st = { convs: [], active: null, msgs: new Map(), files: [], models: [], model: null, sending: false, timer: null };

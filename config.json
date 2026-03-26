@@ -2,14 +2,14 @@
   "llm": {
     "base_url": "https://api.hanbbq.top/v1",
     "api_key": "sk-caea873755b2a0ea56ccc1fd7c28b8b0",
-    "model": "GPT-5.3-Codex",
+    "model": "gpt-5.3-codex",
     "candidate_models": [
-      "GPT-5.3-Codex",
-      "GPT-5.4",
-      "GPT-5.2-Codex",
-      "GPT-5.1-Codex-Max",
-      "GPT-5.2",
-      "GPT-5.1-Codex-Mini"
+      "gpt-5.3-codex",
+      "gpt-5.4",
+      "gpt-5.2-codex",
+      "gpt-5.1-codex-max",
+      "gpt-5.2",
+      "gpt-5.1-codex-mini"
     ]
   }
 }

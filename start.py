@@ -3,358 +3,241 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from datetime import datetime, timezone
+import webbrowser
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from file_store import build_attachment_texts, save_upload_request
-from model_client import (
-    ModelClientError,
-    chat_completion,
-    compose_messages_for_request,
-    list_candidate_models as mc_list_candidate_models,
-    load_model_config,
-    merge_user_message_with_attachments,
-)
+from create_conversation_api import create_conversation
+from history_api import list_conversations
+from list_messages_api import list_messages
+from model_list_api import list_models
+from render_message_api import render_message
+from send_message_api import send_message
+from switch_model_api import switch_model
+from upload_file_api import upload_file
 
 
-BASE_DIR = Path(__file__).resolve().parent
-WEBUI_PATH = BASE_DIR / "webui.html"
-CONFIG_PATH = BASE_DIR / "config.json"
-DEFAULT_MODELS = ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2"]
+class ChatHandler(BaseHTTPRequestHandler):
+    ui_file: Path
+    config_path: Path
 
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def now_ms() -> int:
-    return int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-
-
-def normalize_model_name(model: object) -> str:
-    return str(model or "").strip().lower()
-
-
-def load_candidate_models() -> list[str]:
-    try:
-        models = mc_list_candidate_models(CONFIG_PATH)
-        normalized = [normalize_model_name(model) for model in models]
-        return [model for model in normalized if model] or DEFAULT_MODELS[:]
-    except Exception:
-        return DEFAULT_MODELS[:]
-
-
-def inject_runtime_config(html: str) -> str:
-    if "<script>window.CLOUD_CHAT_ENDPOINTS =" in html:
-        return html
-
-    endpoints = {
-        "listConversations": "/api/history",
-        "createConversation": "/api/conversations",
-        "sendMessage": "/api/messages",
-        "uploadFile": "/api/files",
-        "switchModel": "/api/model/switch",
-        "listModels": "/api/models",
-    }
-    runtime_script = (
-        "<script>window.CLOUD_CHAT_ENDPOINTS = "
-        + json.dumps(endpoints, ensure_ascii=False)
-        + ";</script>"
-    )
-
-    if "<script>" in html:
-        return html.replace("<script>", runtime_script + "\n<script>", 1)
-    return html + "\n" + runtime_script
-
-
-def parse_json_body(handler: BaseHTTPRequestHandler) -> dict:
-    raw = read_body(handler)
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw.decode("utf-8"))
-    except Exception:
-        return {}
-
-
-def read_body(handler: BaseHTTPRequestHandler) -> bytes:
-    length_str = handler.headers.get("Content-Length", "0")
-    try:
-        length = int(length_str)
-    except ValueError:
-        length = 0
-    if length <= 0:
-        return b""
-    return handler.rfile.read(length)
-
-
-def build_model_try_order(requested_model: str, default_model: str, candidates: list[str]) -> list[str]:
-    ordered = [requested_model, default_model, *candidates]
-    out: list[str] = []
-    seen: set[str] = set()
-    for item in ordered:
-        model = normalize_model_name(item)
-        if not model:
-            continue
-        if model in seen:
-            continue
-        seen.add(model)
-        out.append(model)
-    return out
-
-
-def is_non_retryable_error(error_text: str) -> bool:
-    lower = error_text.lower()
-    hard_fail_tokens = [
-        "401",
-        "403",
-        "invalid_api_key",
-        "unauthorized",
-        "forbidden",
-        "insufficient_quota",
-        "billing",
-    ]
-    return any(token in lower for token in hard_fail_tokens)
-
-
-class AppHandler(BaseHTTPRequestHandler):
-    server_version = "CloudChatServer/0.5"
-    protocol_version = "HTTP/1.1"
-
-    def do_OPTIONS(self) -> None:
-        self.send_response(204)
-        self._set_cors_headers()
-        self.send_header("Content-Length", "0")
-        self.send_header("Connection", "close")
-        self.end_headers()
-
-    def do_GET(self) -> None:
-        path = urlparse(self.path).path
-
-        if path in ("/", "/webui.html"):
-            self._serve_webui()
-            return
-
-        if path == "/api/history":
-            self._send_json(200, [])
-            return
-
-        if re.fullmatch(r"/api/conversations/[^/]+/messages", path):
-            self._send_json(200, [])
-            return
-
-        if path == "/api/models":
-            self._send_json(200, load_candidate_models())
-            return
-
-        if path == "/api/health":
-            self._send_json(200, {"status": "ok", "mode": "api-ready"})
-            return
-
-        self._send_json(404, {"error": "Not Found"})
-
-    def do_POST(self) -> None:
-        path = urlparse(self.path).path
-
-        if path == "/api/conversations":
-            payload = parse_json_body(self)
-            models = load_candidate_models()
-            self._send_json(
-                200,
-                {
-                    "id": f"todo_conv_{now_ms()}",
-                    "title": str(payload.get("title") or "未命名对话"),
-                    "model": normalize_model_name(payload.get("model") or models[0]),
-                    "updated_at": utc_now_iso(),
-                    "_todo": "Replace with create_conversation_api implementation.",
-                },
-            )
-            return
-
-        if path == "/api/messages":
-            self._handle_send_message()
-            return
-
-        if path == "/api/files":
-            self._handle_upload_file()
-            return
-
-        if path == "/api/model/switch":
-            payload = parse_json_body(self)
-            self._send_json(
-                200,
-                {
-                    "model": normalize_model_name(payload.get("model") or ""),
-                    "_todo": "Replace with switch_model_api implementation.",
-                },
-            )
-            return
-
-        self._send_json(404, {"error": "Not Found"})
-
-    def _handle_upload_file(self) -> None:
-        content_type = self.headers.get("Content-Type", "")
-        raw_body = read_body(self)
+    def do_GET(self) -> None:  # noqa: N802
         try:
-            uploaded = save_upload_request(content_type=content_type, raw_body=raw_body)
+            parsed = urlparse(self.path)
+            path = parsed.path
+            if path in ("/", "/webui.html"):
+                self._serve_ui()
+                return
+            if path == "/api/history":
+                self._ok({"conversations": list_conversations()})
+                return
+            if path == "/api/models":
+                self._ok({"models": list_models(config_path=self.config_path)})
+                return
+
+            match = re.fullmatch(r"/api/conversations/([^/]+)/messages", path)
+            if match:
+                conversation_id = match.group(1)
+                messages = [
+                    render_message(message)
+                    for message in list_messages(conversation_id=conversation_id)
+                ]
+                self._ok({"messages": messages})
+                return
+
+            self._error(HTTPStatus.NOT_FOUND, "route_not_found")
+        except (ValueError, KeyError) as exc:
+            self._error(HTTPStatus.BAD_REQUEST, "bad_request", detail=str(exc))
         except Exception as exc:
-            self._send_json(400, {"error": "upload_failed", "detail": str(exc)})
-            return
-        self._send_json(200, uploaded)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", detail=str(exc))
 
-    def _handle_send_message(self) -> None:
-        payload = parse_json_body(self)
-        user_text = str(payload.get("message", "")).strip()
-        if not user_text:
-            self._send_json(400, {"error": "message is required"})
-            return
-
+    def do_POST(self) -> None:  # noqa: N802
         try:
-            cfg = load_model_config(CONFIG_PATH)
-        except ModelClientError as exc:
-            self._send_json(500, {"error": "model_config_error", "detail": str(exc)})
-            return
+            parsed = urlparse(self.path)
+            path = parsed.path
 
-        requested_model = normalize_model_name(payload.get("model") or cfg.default_model)
-        conversation_id = str(payload.get("conversationId", "")).strip()
-
-        history_payload = payload.get("history")
-        history_messages: list[dict[str, str]] = []
-        if isinstance(history_payload, list):
-            for item in history_payload:
-                if not isinstance(item, dict):
-                    continue
-                role = item.get("role")
-                content = str(item.get("content", "")).strip()
-                if role in ("system", "user", "assistant") and content:
-                    history_messages.append({"role": role, "content": content})
-
-        file_ids_raw = payload.get("fileIds")
-        file_ids = [str(fid).strip() for fid in file_ids_raw] if isinstance(file_ids_raw, list) else []
-        file_ids = [fid for fid in file_ids if fid]
-
-        attachment_blocks = build_attachment_texts(file_ids) if file_ids else []
-        user_text_for_model = merge_user_message_with_attachments(
-            user_text,
-            attachment_blocks,
-            max_chars_total=12000,
-        )
-
-        model_messages = compose_messages_for_request(
-            system_prompt=None,
-            history_messages=history_messages,
-            user_message=user_text_for_model,
-        )
-
-        try_models = build_model_try_order(
-            requested_model,
-            normalize_model_name(cfg.default_model),
-            [normalize_model_name(model) for model in cfg.candidate_models],
-        )
-        attempts: list[dict[str, str]] = []
-        used_model = ""
-        reply_text = ""
-
-        for candidate_model in try_models:
-            try:
-                reply_text = chat_completion(
-                    config=cfg,
-                    model=candidate_model,
-                    messages=model_messages,
-                    metadata={"conversation_id": conversation_id} if conversation_id else None,
+            if path == "/api/conversations":
+                payload = self._read_json()
+                conversation = create_conversation(
+                    title=payload.get("title"),
+                    model=payload.get("model"),
                 )
-                used_model = candidate_model
-                break
-            except ModelClientError as exc:
-                error_text = str(exc)
-                attempts.append({"model": candidate_model, "error": error_text})
-                if is_non_retryable_error(error_text):
-                    break
+                self._ok(conversation, status=HTTPStatus.CREATED)
+                return
 
-        if not used_model:
-            last_detail = attempts[-1]["error"] if attempts else "unknown model error"
-            self._send_json(
-                502,
-                {
-                    "error": "model_request_failed",
-                    "detail": last_detail,
-                    "attempts": attempts,
-                },
-            )
+            if path == "/api/messages":
+                payload = self._read_json()
+                reply = send_message(
+                    conversation_id=str(payload.get("conversationId", "")).strip(),
+                    message=str(payload.get("message", "")),
+                    file_ids=payload.get("fileIds") or [],
+                    model=payload.get("model"),
+                )
+                self._ok({"message": render_message(reply)})
+                return
+
+            if path == "/api/model/switch":
+                payload = self._read_json()
+                model_name = switch_model(
+                    conversation_id=(str(payload.get("conversationId", "")).strip() or None),
+                    model=str(payload.get("model", "")),
+                )
+                self._ok({"model": model_name})
+                return
+
+            if path == "/api/files":
+                filename, content, content_type = self._read_single_file(field_name="file")
+                file_info = upload_file(
+                    filename=filename,
+                    content=content,
+                    content_type=content_type,
+                )
+                self._ok(file_info, status=HTTPStatus.CREATED)
+                return
+
+            self._error(HTTPStatus.NOT_FOUND, "route_not_found")
+        except (ValueError, KeyError) as exc:
+            self._error(HTTPStatus.BAD_REQUEST, "bad_request", detail=str(exc))
+        except Exception as exc:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", detail=str(exc))
+
+    def _serve_ui(self) -> None:
+        if not self.ui_file.exists():
+            self._error(HTTPStatus.NOT_FOUND, "webui_not_found")
             return
-
-        self._send_json(
-            200,
-            {
-                "message": {
-                    "id": f"todo_msg_{now_ms()}",
-                    "role": "assistant",
-                    "content": reply_text,
-                    "created_at": utc_now_iso(),
-                },
-                "model": used_model,
-                "fallback_used": used_model != requested_model,
-                "attempts": attempts,
-                "files_used": len(attachment_blocks),
-            },
-        )
-
-    def _serve_webui(self) -> None:
-        if not WEBUI_PATH.exists():
-            self._send_text(404, "webui.html not found")
-            return
-
-        html = WEBUI_PATH.read_text(encoding="utf-8")
-        final_html = inject_runtime_config(html)
-        self._send_bytes(
-            200,
-            final_html.encode("utf-8"),
-            content_type="text/html; charset=utf-8",
-        )
-
-    def _send_json(self, status: int, payload: object) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self._send_bytes(status, body, content_type="application/json; charset=utf-8")
-
-    def _send_text(self, status: int, text: str) -> None:
-        self._send_bytes(status, text.encode("utf-8"), content_type="text/plain; charset=utf-8")
-
-    def _send_bytes(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self._set_cors_headers()
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
+        data = self.ui_file.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(data)
 
-    def _set_cors_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    def _ok(self, payload: dict[str, Any], *, status: HTTPStatus = HTTPStatus.OK) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
-    def log_message(self, format: str, *args: Any) -> None:
-        print(f"[{self.log_date_time_string()}] {self.address_string()} {format % args}")
+    def _error(self, status: HTTPStatus, code: str, detail: str | None = None) -> None:
+        payload = {"error": code}
+        if detail:
+            payload["detail"] = detail
+        self._ok(payload, status=status)
+
+    def _read_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length) if length > 0 else b"{}"
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw.decode("utf-8"))
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid_json") from exc
+
+    def _read_single_file(self, *, field_name: str) -> tuple[str, bytes, str | None]:
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ValueError("content_type_must_be_multipart_form_data")
+
+        boundary_match = re.search(r'boundary="?([^";]+)"?', content_type)
+        if not boundary_match:
+            raise ValueError("missing_multipart_boundary")
+        boundary = boundary_match.group(1).encode("utf-8")
+
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length) if length > 0 else b""
+        if not raw:
+            raise ValueError("empty_multipart_body")
+
+        marker = b"--" + boundary
+        parts = raw.split(marker)
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith(b"\r\n"):
+                part = part[2:]
+            if part.endswith(b"--\r\n"):
+                part = part[:-4]
+            elif part.endswith(b"\r\n"):
+                part = part[:-2]
+            elif part == b"--":
+                continue
+
+            header_blob, sep, body = part.partition(b"\r\n\r\n")
+            if sep == b"":
+                continue
+            headers_text = header_blob.decode("utf-8", errors="ignore")
+            disposition_match = re.search(
+                r'Content-Disposition:\s*form-data;\s*name="([^"]+)"(?:;\s*filename="([^"]*)")?',
+                headers_text,
+                flags=re.IGNORECASE,
+            )
+            if not disposition_match:
+                continue
+            name, filename = disposition_match.group(1), disposition_match.group(2)
+            if name != field_name:
+                continue
+            file_content = body
+            file_type_match = re.search(
+                r"Content-Type:\s*([^\r\n]+)", headers_text, flags=re.IGNORECASE
+            )
+            file_type = file_type_match.group(1).strip() if file_type_match else None
+            if file_content.endswith(b"\r\n"):
+                file_content = file_content[:-2]
+            return filename or "upload.bin", file_content, file_type
+
+        raise ValueError("file_field_not_found")
+
+    def log_message(self, format_: str, *args: Any) -> None:
+        return
 
 
-def run(host: str = "127.0.0.1", port: int = 8000) -> None:
-    server = ThreadingHTTPServer((host, port), AppHandler)
-    print(f"Server started: http://{host}:{port}")
-    print("Mode: api-ready (uploads + messages + cloud model)")
+def make_handler(ui_file: Path, config_path: Path) -> type[ChatHandler]:
+    class BoundHandler(ChatHandler):
+        pass
+
+    BoundHandler.ui_file = ui_file
+    BoundHandler.config_path = config_path
+    return BoundHandler
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Cloud LLM Chat startup entry")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind host, default 127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000, help="Bind port, default 8000")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open browser automatically after startup",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    ui_file = Path(__file__).with_name("webui.html")
+    config_path = Path(__file__).with_name("config.json")
+    handler_cls = make_handler(ui_file=ui_file, config_path=config_path)
+
+    server = ThreadingHTTPServer((args.host, args.port), handler_cls)
+    url = f"http://{args.host}:{args.port}/"
+    print(f"CloudChat started at: {url}")
+    if not args.no_browser:
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        pass
     finally:
         server.server_close()
+        print("CloudChat stopped")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Cloud Chat WebUI server (standard library).")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host, default 127.0.0.1")
-    parser.add_argument("--port", default=8000, type=int, help="Bind port, default 8000")
-    args = parser.parse_args()
-    run(host=args.host, port=args.port)
+    main()
