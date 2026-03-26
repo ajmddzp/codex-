@@ -21,7 +21,7 @@ from model_client import (
 BASE_DIR = Path(__file__).resolve().parent
 WEBUI_PATH = BASE_DIR / "webui.html"
 CONFIG_PATH = BASE_DIR / "config.json"
-DEFAULT_MODELS = ["GPT-5.4", "GPT-5.3-Codex", "GPT-5.2"]
+DEFAULT_MODELS = ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2"]
 
 
 def utc_now_iso() -> str:
@@ -32,12 +32,17 @@ def now_ms() -> int:
     return int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
 
+def normalize_model_name(model: object) -> str:
+    return str(model or "").strip().lower()
+
+
 def load_candidate_models() -> list[str]:
     try:
         models = mc_list_candidate_models(CONFIG_PATH)
-        return models if models else DEFAULT_MODELS
+        normalized = [normalize_model_name(model) for model in models]
+        return [m for m in normalized if m] or DEFAULT_MODELS[:]
     except Exception:
-        return DEFAULT_MODELS
+        return DEFAULT_MODELS[:]
 
 
 def inject_runtime_config(html: str) -> str:
@@ -100,15 +105,14 @@ def build_model_try_order(requested_model: str, default_model: str, candidates: 
     ordered = [requested_model, default_model, *candidates]
     out: list[str] = []
     seen: set[str] = set()
-    for model in ordered:
-        value = str(model or "").strip()
-        if not value:
+    for item in ordered:
+        model = normalize_model_name(item)
+        if not model:
             continue
-        key = value.lower()
-        if key in seen:
+        if model in seen:
             continue
-        seen.add(key)
-        out.append(value)
+        seen.add(model)
+        out.append(model)
     return out
 
 
@@ -127,7 +131,7 @@ def is_non_retryable_error(error_text: str) -> bool:
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "CloudChatServer/0.3"
+    server_version = "CloudChatServer/0.4"
     protocol_version = "HTTP/1.1"
 
     def do_OPTIONS(self) -> None:
@@ -173,7 +177,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 {
                     "id": f"todo_conv_{now_ms()}",
                     "title": str(payload.get("title") or "未命名对话"),
-                    "model": str(payload.get("model") or models[0]),
+                    "model": normalize_model_name(payload.get("model") or models[0]),
                     "updated_at": utc_now_iso(),
                     "_todo": "Replace with create_conversation_api implementation.",
                 },
@@ -204,7 +208,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json(
                 200,
                 {
-                    "model": str(payload.get("model") or ""),
+                    "model": normalize_model_name(payload.get("model") or ""),
                     "_todo": "Replace with switch_model_api implementation.",
                 },
             )
@@ -225,7 +229,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": "model_config_error", "detail": str(exc)})
             return
 
-        requested_model = str(payload.get("model") or cfg.default_model).strip() or cfg.default_model
+        requested_model = normalize_model_name(payload.get("model") or cfg.default_model)
         conversation_id = str(payload.get("conversationId", "")).strip()
 
         history_payload = payload.get("history")
@@ -245,7 +249,11 @@ class AppHandler(BaseHTTPRequestHandler):
             user_message=user_text,
         )
 
-        try_models = build_model_try_order(requested_model, cfg.default_model, cfg.candidate_models)
+        try_models = build_model_try_order(
+            requested_model,
+            normalize_model_name(cfg.default_model),
+            [normalize_model_name(model) for model in cfg.candidate_models],
+        )
         attempts: list[dict[str, str]] = []
         used_model = ""
         reply_text = ""
@@ -288,7 +296,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "created_at": utc_now_iso(),
                 },
                 "model": used_model,
-                "fallback_used": used_model.lower() != requested_model.lower(),
+                "fallback_used": used_model != requested_model,
                 "attempts": attempts,
             },
         )
