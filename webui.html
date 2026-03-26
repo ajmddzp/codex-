@@ -1,0 +1,522 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloud LLM Chat UI</title>
+  <style>
+    :root {
+      --bg: #eef4f3;
+      --card: #ffffffd9;
+      --line: #cfe0dc;
+      --txt: #17302b;
+      --muted: #5e7772;
+      --brand: #0f766e;
+      --brand2: #0b5f59
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    html,
+    body {
+      height: 100%
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "Segoe UI", sans-serif;
+      color: var(--txt);
+      background: radial-gradient(circle at 0 0, #dbeceb, transparent 35%), radial-gradient(circle at 100% 100%, #f2e5d6, transparent 28%), var(--bg)
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 12px;
+      height: calc(100vh - 20px);
+      padding: 10px
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      backdrop-filter: blur(8px)
+    }
+
+    .side {
+      display: flex;
+      flex-direction: column;
+      min-height: 0
+    }
+
+    .side-hd {
+      padding: 14px;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--txt);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer
+    }
+
+    .btn.primary {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff
+    }
+
+    .btn.primary:hover {
+      background: var(--brand2)
+    }
+
+    .list {
+      overflow: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .item {
+      border: 1px solid transparent;
+      background: #fff;
+      border-radius: 10px;
+      padding: 9px;
+      cursor: pointer;
+      text-align: left
+    }
+
+    .item:hover {
+      border-color: #84b7b0
+    }
+
+    .item.active {
+      background: #dff0ed;
+      border-color: #4aa69b
+    }
+
+    .item b {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .item small {
+      color: var(--muted)
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0
+    }
+
+    .hd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .hd p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px
+    }
+
+    .model-wrap {
+      position: relative
+    }
+
+    .menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      width: 200px;
+      max-height: 220px;
+      overflow: auto;
+      padding: 6px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      display: none;
+      z-index: 3
+    }
+
+    .menu.show {
+      display: block
+    }
+
+    .menu button {
+      width: 100%;
+      text-align: left;
+      padding: 7px 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 8px;
+      cursor: pointer
+    }
+
+    .menu button:hover {
+      background: #eef8f6;
+      border-color: #9bc8c2
+    }
+
+    .msgs {
+      overflow: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px
+    }
+
+    .msg {
+      max-width: 86%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      white-space: pre-wrap;
+      word-break: break-word
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand)
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background: #fff
+    }
+
+    .msg.error {
+      align-self: center;
+      color: #b54b4b;
+      background: #fff3f3;
+      border-color: #e8bcbc
+    }
+
+    .meta {
+      font-size: 11px;
+      opacity: .7;
+      margin-top: 4px
+    }
+
+    .empty {
+      margin: auto;
+      padding: 16px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed #9eb8b3;
+      border-radius: 12px;
+      background: #ffffffa6
+    }
+
+    .cp {
+      border-top: 1px solid var(--line);
+      padding: 10px 12px
+    }
+
+    .files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px
+    }
+
+    .pill button {
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--muted)
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 78px;
+      max-height: 180px;
+      resize: none;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font: inherit;
+      outline: none
+    }
+
+    textarea:focus {
+      border-color: #70b1a8;
+      box-shadow: 0 0 0 2px #b3ddd7
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap
+    }
+
+    .notice {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      display: none;
+      z-index: 5
+    }
+
+    .notice.show {
+      display: block
+    }
+
+    @media (max-width:900px) {
+      .app {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: 100vh
+      }
+
+      .side {
+        min-height: 220px
+      }
+
+      .main {
+        min-height: 70vh
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="notice" class="notice"></div>
+  <div class="app">
+    <aside class="side card">
+      <div class="side-hd">
+        <button id="newBtn" class="btn primary" style="width:100%">+ 新建对话</button>
+      </div>
+      <div id="convList" class="list"></div>
+    </aside>
+    <section class="main card">
+      <header class="hd">
+        <div>
+          <div id="title" style="font-weight:700">未选择会话</div>
+          <p id="sub">请选择历史对话或新建。</p>
+        </div>
+        <div class="model-wrap">
+          <button id="modelBtn" class="btn">模型：<span id="modelTxt">--</span></button>
+          <div id="modelMenu" class="menu"></div>
+        </div>
+      </header>
+      <div id="msgs" class="msgs">
+        <div class="empty">中间区域为当前对话内容，本地渲染；可对接云端大模型接口。</div>
+      </div>
+      <footer class="cp">
+        <div id="files" class="files"></div>
+        <textarea id="input" placeholder="输入消息（Enter发送，Shift+Enter换行）"></textarea>
+        <div class="row">
+          <div>
+            <button id="fileBtn" class="btn">添加文件</button>
+            <input id="fileInput" type="file" hidden multiple />
+          </div>
+          <button id="sendBtn" class="btn primary">发送</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+  <script>
+    /* 接口约定：
+    window.CloudChatBridge = {
+      listConversations, createConversation, listMessages,
+      sendMessage, uploadFile, switchModel, listModels
+    }
+    window.CLOUD_CHAT_ENDPOINTS = {
+      listConversations:'/api/history',
+      createConversation:'/api/conversations',
+      listMessages:(id)=>`/api/conversations/${id}/messages`,
+      sendMessage:'/api/messages',
+      uploadFile:'/api/files',
+      switchModel:'/api/model/switch',
+      listModels:'/api/models'
+    }
+    window.CloudChatHooks = { onHistory, onCreate, onInput, onSend, onFile, onModel }
+    */
+    const bridge = pickBridge();
+    const hooks = window.CloudChatHooks || {};
+    const st = { convs: [], active: null, msgs: new Map(), files: [], models: [], model: null, sending: false, timer: null };
+    const $ = (id) => document.getElementById(id);
+    const el = { list: $('convList'), msgs: $('msgs'), title: $('title'), sub: $('sub'), input: $('input'), files: $('files'), modelTxt: $('modelTxt'), menu: $('modelMenu'), notice: $('notice') };
+
+    init();
+    async function init() {
+      bind();
+      st.models = await safe('listModels');
+      st.model = st.models[0] || 'GPT-5.4';
+      st.convs = (await safe('listConversations')).map(normConv);
+      fire('onHistory', { conversations: st.convs });
+      if (st.convs[0]) await activate(st.convs[0].id);
+      render();
+    }
+    function bind() {
+      $('newBtn').onclick = createConv;
+      $('sendBtn').onclick = send;
+      $('fileBtn').onclick = () => $('fileInput').click();
+      $('fileInput').onchange = () => uploadFiles($('fileInput').files);
+      $('modelBtn').onclick = (e) => { e.stopPropagation(); el.menu.classList.toggle('show') };
+      document.addEventListener('click', (e) => { if (!e.target.closest('.model-wrap')) el.menu.classList.remove('show') });
+      el.list.onclick = async (e) => { const n = e.target.closest('[data-id]'); if (!n) return; await activate(n.dataset.id) };
+      el.input.addEventListener('input', () => { resizeInput(); fire('onInput', { conversationId: st.active, value: el.input.value }) });
+      el.input.addEventListener('keydown', async (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); await send(); } });
+      el.files.onclick = (e) => { const x = e.target.closest('[data-rm]'); if (!x) return; st.files = st.files.filter(f => f.localId !== x.dataset.rm); renderFiles(); };
+      el.menu.onclick = async (e) => { const n = e.target.closest('[data-model]'); if (!n) return; await changeModel(n.dataset.model); el.menu.classList.remove('show'); };
+    }
+    async function activate(id) {
+      st.active = id;
+      if (!st.msgs.has(id)) {
+        const arr = await safe('listMessages', { conversationId: id });
+        st.msgs.set(id, (arr || []).map(normMsg));
+      }
+      const c = st.convs.find(v => v.id === id); if (c && c.model) st.model = c.model;
+      render();
+    }
+    async function createConv() {
+      const c = normConv(await safe('createConversation', { title: `新对话 ${st.convs.length + 1}`, model: st.model }));
+      st.convs.unshift(c); st.msgs.set(c.id, []); st.active = c.id;
+      fire('onCreate', { conversation: c }); render();
+    }
+    async function send() {
+      const text = el.input.value.trim(); if (!text || st.sending) return;
+      if (!st.active) await createConv();
+      const id = st.active, arr = st.msgs.get(id) || [];
+      arr.push({ id: uid('u'), role: 'user', content: text, created_at: new Date().toISOString() });
+      st.msgs.set(id, arr);
+      const fileIds = st.files.filter(f => f.fileId).map(f => f.fileId);
+      fire('onSend', { conversationId: id, message: text, fileIds, model: st.model });
+      st.files = []; el.input.value = ''; resizeInput(); st.sending = true; render();
+      try {
+        const r = await safe('sendMessage', { conversationId: id, message: text, fileIds, model: st.model });
+        const m = normReply(r); (st.msgs.get(id) || []).push(m); touch(id);
+      } catch (e) { (st.msgs.get(id) || []).push({ id: uid('e'), role: 'error', content: `发送失败：${e.message}`, created_at: new Date().toISOString() }); }
+      st.sending = false; render();
+    }
+    async function uploadFiles(fs) {
+      const list = Array.from(fs || []); if (!list.length) return;
+      for (const f of list) {
+        const p = { localId: uid('f'), name: f.name, status: '上传中', fileId: null }; st.files.push(p); renderFiles();
+        try { const r = await safe('uploadFile', f); p.fileId = String(r?.id || p.localId); p.status = '已添加'; fire('onFile', { ...p, size: f.size }); }
+        catch { p.status = '失败' }
+        renderFiles();
+      }
+      $('fileInput').value = '';
+    }
+    async function changeModel(model) {
+      if (!model || model === st.model) return;
+      const r = await safe('switchModel', { conversationId: st.active, model });
+      st.model = String(r?.model || model);
+      const c = st.convs.find(v => v.id === st.active); if (c) { c.model = st.model; c.updated_at = new Date().toISOString(); }
+      fire('onModel', { conversationId: st.active, model: st.model });
+      renderHeader(); renderList(); renderMenu();
+    }
+    function render() { renderList(); renderMsgs(); renderFiles(); renderMenu(); renderHeader(); resizeInput(); $('sendBtn').disabled = st.sending; $('fileBtn').disabled = st.sending; }
+    function renderList() {
+      el.list.innerHTML = '';
+      if (!st.convs.length) { el.list.innerHTML = '<div class="empty">暂无历史对话</div>'; return; }
+      st.convs.forEach(c => { const b = document.createElement('button'); b.className = 'item' + (c.id === st.active ? ' active' : ''); b.dataset.id = c.id; b.innerHTML = `<b>${esc(c.title)}</b><small>${esc(c.model || '--')} · ${fmt(c.updated_at)}</small>`; el.list.appendChild(b); });
+    }
+    function renderMsgs() {
+      el.msgs.innerHTML = ''; const arr = st.active ? (st.msgs.get(st.active) || []) : [];
+      if (!st.active || !arr.length) { el.msgs.innerHTML = '<div class="empty">这里显示当前会话内容。</div>'; return; }
+      arr.forEach(m => { const d = document.createElement('div'); d.className = 'msg ' + m.role; d.innerHTML = `<div>${esc(m.content)}</div><div class="meta">${roleName(m.role)} · ${fmt(m.created_at)}</div>`; el.msgs.appendChild(d); });
+      el.msgs.scrollTop = el.msgs.scrollHeight;
+    }
+    function renderFiles() {
+      el.files.innerHTML = '';
+      st.files.forEach(f => { const d = document.createElement('div'); d.className = 'pill'; d.innerHTML = `<span>${esc(f.name)} (${f.status})</span><button data-rm="${f.localId}">×</button>`; el.files.appendChild(d); });
+    }
+    function renderMenu() {
+      el.menu.innerHTML = ''; (st.models.length ? st.models : [st.model]).forEach(m => { const b = document.createElement('button'); b.dataset.model = m; b.textContent = m; if (m === st.model) b.style.background = '#e2f2ef'; el.menu.appendChild(b); });
+      el.modelTxt.textContent = st.model || '--';
+    }
+    function renderHeader() {
+      const c = st.convs.find(v => v.id === st.active);
+      el.title.textContent = c ? c.title : '未选择会话';
+      el.sub.textContent = c ? `当前模型：${c.model || st.model || '--'}` : '请选择历史对话或新建。';
+    }
+    function resizeInput() { el.input.style.height = 'auto'; el.input.style.height = Math.min(el.input.scrollHeight, 180) + 'px'; }
+    function touch(id) { const c = st.convs.find(v => v.id === id); if (!c) return; c.updated_at = new Date().toISOString(); c.model = st.model; st.convs = [c, ...st.convs.filter(v => v.id !== id)]; }
+    async function safe(name, arg) {
+      const fn = bridge?.[name]; if (typeof fn !== 'function') throw new Error(`缺少接口：${name}`);
+      try { return await fn(arg); } catch (e) { toast(e.message || String(e)); throw e; }
+    }
+    function fire(name, payload) { try { hooks[name]?.(payload); } catch { } document.dispatchEvent(new CustomEvent('cloudchat:' + name, { detail: payload })); }
+    function toast(msg) { clearTimeout(st.timer); el.notice.textContent = msg; el.notice.classList.add('show'); st.timer = setTimeout(() => el.notice.classList.remove('show'), 1800); }
+    function uid(p) { return `${p}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}` }
+    function fmt(t) { const d = t ? new Date(t) : new Date(); return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+    function roleName(r) { return r === 'user' ? '你' : r === 'assistant' ? '模型' : '系统' }
+    function esc(s) { return String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;') }
+    function normConv(c) { return { id: String(c?.id || uid('conv')), title: String(c?.title || '未命名对话'), model: String(c?.model || st.model || ''), updated_at: c?.updated_at || new Date().toISOString() } }
+    function normMsg(m) { return { id: String(m?.id || uid('m')), role: (m?.role === 'user' || m?.role === 'assistant' || m?.role === 'error') ? m.role : 'assistant', content: String(m?.content ?? m?.text ?? m?.message ?? ''), created_at: m?.created_at || new Date().toISOString() } }
+    function normReply(r) { if (typeof r === 'string') return normMsg({ role: 'assistant', content: r }); const m = r?.message || r?.reply || r?.data || r; return normMsg({ role: 'assistant', content: m?.content ?? m?.text ?? m?.message ?? '(空回复)', id: m?.id, created_at: m?.created_at }); }
+
+    function pickBridge() {
+      if (window.CloudChatBridge) return window.CloudChatBridge;
+      if (window.CLOUD_CHAT_ENDPOINTS) return makeHttpBridge(window.CLOUD_CHAT_ENDPOINTS);
+      return makeMockBridge();
+    }
+    function makeHttpBridge(ep) {
+      return {
+        async listConversations() { const d = await req(ep.listConversations || '/api/history'); return arr(d, 'conversations', 'items', 'data', 'list') },
+        async createConversation(payload) { return req(ep.createConversation || '/api/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) },
+        async listMessages({ conversationId }) { const u = typeof ep.listMessages === 'function' ? ep.listMessages(conversationId) : (ep.listMessages || `/api/conversations/${encodeURIComponent(conversationId)}/messages`); const d = await req(u); return arr(d, 'messages', 'items', 'data', 'list') },
+        async sendMessage(payload) { return req(ep.sendMessage || '/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) },
+        async uploadFile(file) { const fd = new FormData(); fd.append('file', file); return req(ep.uploadFile || '/api/files', { method: 'POST', body: fd }) },
+        async switchModel(payload) { return req(ep.switchModel || '/api/model/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) },
+        async listModels() { const d = await req(ep.listModels || '/api/models'); return arr(d, 'models', 'items', 'data', 'list').map(v => String(v?.id ?? v?.name ?? v)) }
+      };
+    }
+    async function req(url, opt) { const r = await fetch(url, opt); if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`${r.status} ${r.statusText} ${t}`.trim()) } if (r.status === 204) return {}; return r.json(); }
+    function arr(v, ...ks) { if (Array.isArray(v)) return v; for (const k of ks) { if (Array.isArray(v?.[k])) return v[k] } return [] }
+
+    function makeMockBridge() {
+      const db = { models: ['GPT-5.4', 'GPT-5.3-Codex', 'DeepSeek-R1'], convs: [{ id: 'demo', title: '欢迎会话', model: 'GPT-5.4', updated_at: new Date().toISOString() }], msgs: { demo: [{ id: 'a1', role: 'assistant', content: '你好，可以直接输入消息测试本地渲染。', created_at: new Date().toISOString() }] } };
+      return {
+        async listConversations() { return db.convs.slice() },
+        async createConversation({ title, model }) { const c = { id: uid('conv'), title: title || '新对话', model: model || db.models[0], updated_at: new Date().toISOString() }; db.convs.unshift(c); db.msgs[c.id] = []; return c; },
+        async listMessages({ conversationId }) { return (db.msgs[conversationId] || []).slice() },
+        async sendMessage({ conversationId, message, model, fileIds }) { const m = { id: uid('a'), role: 'assistant', content: `已收到：${message}\n模型：${model}\n文件：${(fileIds || []).length}`, created_at: new Date().toISOString() }; (db.msgs[conversationId] || (db.msgs[conversationId] = [])).push(m); return { message: m }; },
+        async uploadFile(file) { return { id: uid('file'), name: file.name, size: file.size } },
+        async switchModel({ conversationId, model }) { const c = db.convs.find(v => v.id === conversationId); if (c) c.model = model; if (!db.models.includes(model)) db.models.unshift(model); return { model }; },
+        async listModels() { return db.models.slice() }
+      };
+    }
+  </script>
+</body>
+
+</html>
