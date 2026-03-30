@@ -14,6 +14,7 @@ from create_conversation_api import create_conversation
 from history_api import list_conversations
 from list_messages_api import list_messages
 from model_list_api import list_models
+from model_client import ModelBusyError
 from render_message_api import render_message
 from send_message_api import send_message
 from switch_model_api import switch_model
@@ -51,6 +52,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "route_not_found")
         except (ValueError, KeyError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, "bad_request", detail=str(exc))
+        except ModelBusyError as exc:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS, "server_busy", detail=str(exc))
         except Exception as exc:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", detail=str(exc))
 
@@ -101,6 +104,8 @@ class ChatHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "route_not_found")
         except (ValueError, KeyError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, "bad_request", detail=str(exc))
+        except ModelBusyError as exc:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS, "server_busy", detail=str(exc))
         except Exception as exc:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", detail=str(exc))
 

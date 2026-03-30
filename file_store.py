@@ -15,10 +15,16 @@ def save_file(*, filename: str, content: bytes, content_type: str | None) -> dic
         "name": safe_name,
         "size": len(content),
         "content_type": content_type,
+        "_content": bytes(content or b""),
     }
     with _LOCK:
         _FILES[item["id"]] = dict(item)
-    return dict(item)
+    return {
+        "id": item["id"],
+        "name": item["name"],
+        "size": item["size"],
+        "content_type": item["content_type"],
+    }
 
 
 def get_files(*, file_ids: list[str]) -> list[dict[str, Any]]:

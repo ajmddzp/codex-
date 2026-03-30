@@ -56,6 +56,21 @@ def list_messages(*, conversation_id: str) -> list[dict[str, Any]]:
 
 
 def append_message(*, conversation_id: str, role: str, content: str) -> dict[str, Any]:
+    return append_message_with_model_content(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        model_content=None,
+    )
+
+
+def append_message_with_model_content(
+    *,
+    conversation_id: str,
+    role: str,
+    content: str,
+    model_content: str | None,
+) -> dict[str, Any]:
     conv_id = str(conversation_id or "").strip()
     if not conv_id:
         raise ValueError("conversation_id_required")
@@ -68,6 +83,7 @@ def append_message(*, conversation_id: str, role: str, content: str) -> dict[str
         "conversation_id": conv_id,
         "role": normalized_role,
         "content": text,
+        "model_content": str(model_content if model_content is not None else text),
         "created_at": _now_iso(),
     }
     with _LOCK:
